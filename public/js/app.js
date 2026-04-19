@@ -158,7 +158,10 @@ function formatHeartbeat(hb) {
 
 // ── Missions ───────────────────────────────────────────────────
 async function renderMissions(el, actions) {
-  actions.innerHTML = '<button class="btn btn-primary" onclick="openModal()">+ New Mission</button>';
+  actions.innerHTML = `
+    <button class="btn" onclick="showTemplates()">📋 From Template</button>
+    <button class="btn btn-primary" onclick="openModal()">+ New Mission</button>
+  `;
 
   if (missions.length === 0) {
     el.innerHTML = `
@@ -472,6 +475,52 @@ async function viewExecHistory(missionId, missionName) {
 
 function closeExecModal() {
   document.getElementById('exec-modal').style.display = 'none';
+}
+
+// ── Templates ──────────────────────────────────────────────────
+let templates = [];
+
+async function showTemplates() {
+  if (templates.length === 0) {
+    templates = await api('/api/templates');
+  }
+  const content = document.getElementById('template-modal-content');
+  if (templates.length === 0) {
+    content.innerHTML = '<div class="empty-state"><p>No templates available.</p></div>';
+  } else {
+    content.innerHTML = `
+      <div style="display:grid;gap:12px">
+        ${templates.map(t => `
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+            <div style="display:flex;justify-content:space-between;align-items:start">
+              <div>
+                <h4 style="margin-bottom:4px">${esc(t.name)}</h4>
+                <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px">${esc(t.description)}</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <span class="badge badge-blue">${t.trigger}</span>
+                  ${t.cronExpr ? `<span class="badge badge-purple">${t.cronExpr}</span>` : ''}
+                  <span class="badge badge-green">${t.steps.length} steps</span>
+                </div>
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="useTemplate('${t.id}')">Use Template</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+  document.getElementById('template-modal').style.display = 'flex';
+}
+
+function closeTemplateModal() {
+  document.getElementById('template-modal').style.display = 'none';
+}
+
+async function useTemplate(templateId) {
+  const mission = await api(`/api/templates/${templateId}/use`, { method: 'POST' });
+  closeTemplateModal();
+  await loadMissions();
+  render();
 }
 
 // ── Logs (SSE) ─────────────────────────────────────────────────

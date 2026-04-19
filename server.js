@@ -29,6 +29,38 @@ async function writeJson(file, data) {
   await fs.writeFile(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
+// ─── Templates ─────────────────────────────────────────────────
+const TEMPLATES_FILE = 'templates.json';
+
+app.get('/api/templates', async (req, res) => {
+  const templates = await readJson(TEMPLATES_FILE, []);
+  res.json(templates);
+});
+
+app.post('/api/templates/:id/use', async (req, res) => {
+  const templates = await readJson(TEMPLATES_FILE, []);
+  const template = templates.find(t => t.id === req.params.id);
+  if (!template) return res.status(404).json({ error: 'Template not found' });
+
+  const missions = await readJson(MISSIONS_FILE, []);
+  const mission = {
+    id: uuidv4(),
+    name: template.name + ' (copy)',
+    description: template.description,
+    steps: template.steps,
+    trigger: template.trigger,
+    cronExpr: template.cronExpr || '',
+    enabled: true,
+    createdAt: new Date().toISOString(),
+    lastRun: null,
+    lastStatus: null,
+  };
+  missions.push(mission);
+  await writeJson(MISSIONS_FILE, missions);
+  addLog('mission_created', `Mission "${mission.name}" created from template`);
+  res.json(mission);
+});
+
 // ─── Execution history ─────────────────────────────────────────
 const EXECUTIONS_FILE = 'executions.json';
 
