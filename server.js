@@ -319,6 +319,9 @@ async function executeMission(mission) {
       case 'command':
         result = await runCommand(step.command);
         break;
+      case 'script':
+        result = await runScript(step.path);
+        break;
       case 'http':
         result = await fetchUrl(step.url, step.method || 'GET');
         break;
@@ -329,6 +332,15 @@ async function executeMission(mission) {
       case 'log':
         result = { success: true, message: step.message || 'Log entry' };
         addLog('mission_step', `[${mission.name}] ${step.message}`);
+        break;
+      case 'file-write':
+        result = await writeFileOp(step);
+        break;
+      case 'file-read':
+        result = await readFileOp(step);
+        break;
+      case 'email':
+        result = await sendEmail(step);
         break;
       default:
         result = { success: false, message: `Unknown step type: ${step.type}` };
@@ -368,6 +380,63 @@ function fetchUrl(url, method = 'GET') {
     req.on('timeout', () => { req.destroy(); resolve({ success: false, message: 'Request timed out' }); });
     req.end();
   });
+}
+
+async function runScript(path) {
+  const { exec } = require('child_process');
+  return new Promise((resolve) => {
+    exec(`bash "${path}"`, { timeout: 120000, cwd: WORKSPACE }, (err, stdout, stderr) => {
+      if (err) resolve({ success: false, message: stderr || err.message, output: stdout });
+      else resolve({ success: true, message: `Script executed: ${path}`, output: stdout });
+    });
+  });
+}
+
+async function writeFileOp(step) {
+  const fullPath = path.isAbsolute(step.path) ? step.path : path.join(WORKSPACE, step.path);
+  try {
+    await fs.writeFile(fullPath, step.content || '', 'utf-8');
+    return { success: true, message: `Written ${step.content?.length || 0} bytes to ${step.path}` };
+  } catch (err) {
+    return { success: false, message: `Write failed: ${err.message}` };
+  }
+}
+
+async function readFileOp(step) {
+  const fullPath = path.isAbsolute(step.path) ? step.path : path.join(WORKSPACE, step.path);
+  try {
+    const content = await fs.readFile(fullPath, 'utf-8');
+    return { success: true, message: `Read ${content.length} bytes from ${step.path}`, output: content.substring(0, 1000) };
+  } catch (err) {
+    return { success: false, message: `Read failed: ${err.message}` };
+  }
+}
+
+async function sendEmail(step) {
+  // Email is configured via .env: EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM
+  const nodemailer = require('nodemailer');
+  const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || 'smtp.example.com',
+    port: parseInt(process.env.EMAIL_PORT) || 587,
+    secure: process.env.EMAIL_PORT === '465',
+    auth: {
+      user: process.env.EMAIL_USER || '',
+      pass: process.env.EMAIL_PASS || '',
+    },
+  });
+
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || step.from,
+      to: step.to,
+      subject: step.subject || 'Mission Control Alert',
+      text: step.body || step.html || 'No body',
+      html: step.html || null,
+    });
+    return { success: true, message: `Email sent to ${step.to}` };
+  } catch (err) {
+    return { success: false, message: `Email failed: ${err.message}` };
+  }
 }
 
 // ─── OpenClaw state ──────────────────────────────────────────────

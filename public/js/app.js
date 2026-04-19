@@ -384,16 +384,26 @@ function addStep(data = null) {
       <input type="text" placeholder="Step label (optional)" value="${data ? data.label || '' : ''}" class="step-label">
       <select class="step-type">
         <option value="command" ${data && data.type === 'command' ? 'selected' : ''}>Run Command</option>
+        <option value="script" ${data && data.type === 'script' ? 'selected' : ''}>Run Shell Script</option>
         <option value="http" ${data && data.type === 'http' ? 'selected' : ''}>HTTP Request</option>
+        <option value="file-write" ${data && data.type === 'file-write' ? 'selected' : ''}>Write File</option>
+        <option value="file-read" ${data && data.type === 'file-read' ? 'selected' : ''}>Read File</option>
+        <option value="email" ${data && data.type === 'email' ? 'selected' : ''}>Send Email</option>
         <option value="wait" ${data && data.type === 'wait' ? 'selected' : ''}>Wait</option>
         <option value="log" ${data && data.type === 'log' ? 'selected' : ''}>Log Message</option>
       </select>
       <input type="text" placeholder="Command" value="${data ? data.command || '' : ''}" class="step-command" style="display:${data && data.type !== 'command' ? 'none' : 'block'}">
+      <input type="text" placeholder="/path/to/script.sh" value="${data ? data.path || '' : ''}" class="step-script" style="display:${data && data.type !== 'script' ? 'none' : 'block'}">
       <input type="text" placeholder="https://example.com" value="${data ? data.url || '' : ''}" class="step-url" style="display:${data && data.type !== 'http' ? 'none' : 'block'}">
       <select class="step-method" style="display:${data && data.type !== 'http' ? 'none' : 'block'}">
         <option value="GET" ${data && data.method === 'GET' ? 'selected' : ''}>GET</option>
         <option value="POST" ${data && data.method === 'POST' ? 'selected' : ''}>POST</option>
       </select>
+      <input type="text" placeholder="/path/to/file.txt" value="${data ? data.path || '' : ''}" class="step-file-path" style="display:${data && (data.type !== 'file-write' && data.type !== 'file-read') ? 'none' : 'block'}">
+      <textarea placeholder="File content" class="step-file-content" style="display:${data && data.type !== 'file-write' ? 'none' : 'block'}">${data && data.type === 'file-write' ? (data.content || '') : ''}</textarea>
+      <input type="text" placeholder="recipient@example.com" value="${data ? data.to || '' : ''}" class="step-email-to" style="display:${data && data.type !== 'email' ? 'none' : 'block'}">
+      <input type="text" placeholder="Subject" value="${data ? data.subject || '' : ''}" class="step-email-subject" style="display:${data && data.type !== 'email' ? 'none' : 'block'}">
+      <textarea placeholder="Email body" class="step-email-body" style="display:${data && data.type !== 'email' ? 'none' : 'block'}">${data && data.type === 'email' ? (data.body || '') : ''}</textarea>
       <input type="number" placeholder="Duration (ms)" value="${data ? data.duration || '1000' : '1000'}" class="step-duration" style="display:${data && data.type !== 'wait' ? 'none' : 'block'}">
       <input type="text" placeholder="Message to log" value="${data ? data.message || '' : ''}" class="step-message" style="display:${data && data.type !== 'log' ? 'none' : 'block'}">
       <select class="step-onfailure">
@@ -411,10 +421,19 @@ function addStep(data = null) {
   const select = div.querySelector('.step-type');
   select.addEventListener('change', () => {
     const type = select.value;
-    div.querySelectorAll('.step-command, .step-url, .step-method, .step-duration, .step-message').forEach(input => {
+    div.querySelectorAll('.step-command, .step-script, .step-url, .step-method, .step-duration, .step-message, .step-file-path, .step-file-content, .step-email-to, .step-email-subject, .step-email-body').forEach(input => {
       input.style.display = 'none';
     });
-    const fieldMap = { command: '.step-command', http: '.step-url, .step-method', wait: '.step-duration', log: '.step-message' };
+    const fieldMap = {
+      command: '.step-command',
+      script: '.step-script',
+      http: '.step-url, .step-method',
+      'file-write': '.step-file-path, .step-file-content',
+      'file-read': '.step-file-path',
+      email: '.step-email-to, .step-email-subject, .step-email-body',
+      wait: '.step-duration',
+      log: '.step-message',
+    };
     const fields = fieldMap[type];
     if (fields) div.querySelectorAll(fields).forEach(f => f.style.display = 'block');
   });
@@ -427,7 +446,11 @@ async function saveMission(e) {
     const type = item.querySelector('.step-type').value;
     const step = { type, label: item.querySelector('.step-label').value, onFailure: item.querySelector('.step-onfailure').value };
     if (type === 'command') step.command = item.querySelector('.step-command').value;
+    if (type === 'script') step.path = item.querySelector('.step-script').value;
     if (type === 'http') { step.url = item.querySelector('.step-url').value; step.method = item.querySelector('.step-method').value; }
+    if (type === 'file-write') { step.path = item.querySelector('.step-file-path').value; step.content = item.querySelector('.step-file-content').value; }
+    if (type === 'file-read') step.path = item.querySelector('.step-file-path').value;
+    if (type === 'email') { step.to = item.querySelector('.step-email-to').value; step.subject = item.querySelector('.step-email-subject').value; step.body = item.querySelector('.step-email-body').value; }
     if (type === 'wait') step.duration = parseInt(item.querySelector('.step-duration').value) || 1000;
     if (type === 'log') step.message = item.querySelector('.step-message').value;
     steps.push(step);
