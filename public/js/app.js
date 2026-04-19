@@ -213,6 +213,7 @@ async function renderMissions(el, actions) {
             <th>Name</th>
             <th>Trigger</th>
             <th>Cron</th>
+            <th>Depends On</th>
             <th>Next Run</th>
             <th>Steps</th>
             <th>Last Run</th>
@@ -227,6 +228,10 @@ async function renderMissions(el, actions) {
               <td><strong>${esc(m.name)}</strong><br><small style="color:var(--text-muted)">${esc(m.description || '').substring(0, 60)}</small></td>
               <td><span class="badge badge-blue">${m.trigger}</span></td>
               <td style="font-family:var(--mono);font-size:12px">${m.cronExpr || '—'}</td>
+              <td>${m.dependsOn && m.dependsOn.length > 0 ? m.dependsOn.map(id => {
+                const dep = missions.find(x => x.id === id);
+                return dep ? esc(dep.name) : id.substring(0, 8);
+              }).join(', ') : '<span style="color:var(--text-muted)">—</span>'}</td>
               <td id="next-run-${m.id}">${m.trigger === 'cron' && cronMap[m.id] ? formatNextRun(cronMap[m.id].nextRun) : '—'}</td>
               <td>${(m.steps || []).length}</td>
               <td>${m.lastRun ? timeAgo(m.lastRun) : '—'}</td>
@@ -344,6 +349,7 @@ function openModal(mission = null) {
   document.getElementById('mission-desc').value = mission ? mission.description : '';
   document.getElementById('mission-trigger').value = mission ? mission.trigger : 'manual';
   document.getElementById('mission-cron').value = mission ? mission.cronExpr || '' : '';
+  document.getElementById('mission-depends-on').value = mission && mission.dependsOn ? mission.dependsOn.join(', ') : '';
   toggleCron();
 
   const editor = document.getElementById('steps-editor');
@@ -432,6 +438,10 @@ async function saveMission(e) {
     description: document.getElementById('mission-desc').value,
     trigger: document.getElementById('mission-trigger').value,
     cronExpr: document.getElementById('mission-cron').value,
+    dependsOn: document.getElementById('mission-depends-on').value
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s),
     steps,
   };
 

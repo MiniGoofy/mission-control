@@ -75,6 +75,48 @@ function cronToHuman(expr) {
   return `${parts[0]} ${parts[1]} ${parts[2]} ${months[parts[3]-1]} ${days[parts[4]]}`;
 }
 
+async function triggerDependents(completedMissionId, missions) {
+  const dependents = missions.filter(m => m.dependsOn && m.dependsOn.includes(completedMissionId) && m.enabled);
+  for (const dep of dependents) {
+    addLog('dep_trigger', `Dependency met — triggering "${dep.name}"`);
+    // Run dependent mission
+    const startedAt = new Date().toISOString();
+    try {
+      const result = await executeMission(dep);
+      dep.lastRun = new Date().toISOString();
+      dep.lastStatus = result.success ? 'completed' : 'failed';
+      await saveExecution({
+        id: uuidv4(),
+        missionId: dep.id,
+        missionName: dep.name,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        duration: result.duration || 0,
+        success: result.success,
+        message: result.message,
+        stepResults: result.stepResults || [],
+      });
+      await writeJson(MISSIONS_FILE, missions);
+      addLog('mission_finished', `Dependent mission "${dep.name}" ${result.success ? 'completed' : 'failed'}: ${result.message}`);
+    } catch (err) {
+      dep.lastStatus = 'failed';
+      await saveExecution({
+        id: uuidv4(),
+        missionId: dep.id,
+        missionName: dep.name,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        duration: 0,
+        success: false,
+        message: err.message,
+        stepResults: [],
+      });
+      await writeJson(MISSIONS_FILE, missions);
+      addLog('mission_error', `Dependent mission "${dep.name}" error: ${err.message}`);
+    }
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3210;
 const WORKSPACE = process.env.WORKSPACE || path.join(__dirname, '..');
@@ -174,6 +216,7 @@ app.post('/api/missions', async (req, res) => {
     trigger: req.body.trigger || 'manual', // manual | cron | webhook
     cronExpr: req.body.cronExpr || '',
     enabled: true,
+    dependsOn: req.body.dependsOn || [], // array of mission IDs
     createdAt: new Date().toISOString(),
     lastRun: null,
     lastStatus: null,
@@ -208,6 +251,15 @@ app.post('/api/missions/:id/run', async (req, res) => {
   const mission = missions.find(m => m.id === req.params.id);
   if (!mission) return res.status(404).json({ error: 'Mission not found' });
 
+  // Check dependencies
+  if (mission.dependsOn && mission.dependsOn.length > 0) {
+    const depMissions = mission.dependsOn.map(id => missions.find(m => m.id === id)).filter(Boolean);
+    const failedDeps = depMissions.filter(m => m.lastStatus === 'failed');
+    if (failedDeps.length > 0) {
+      return res.status(400).json({ error: 'Dependencies failed', failed: failedDeps.map(m => m.name) });
+    }
+  }
+
   mission.lastRun = new Date().toISOString();
   mission.lastStatus = 'running';
   await writeJson(MISSIONS_FILE, missions);
@@ -218,7 +270,6 @@ app.post('/api/missions/:id/run', async (req, res) => {
     const startedAt = new Date().toISOString();
     try {
       const result = await executeMission(mission);
-      const duration = Date.now() - Date.now() + 1; // will be set properly below
       mission.lastStatus = result.success ? 'completed' : 'failed';
       await saveExecution({
         id: uuidv4(),
@@ -233,6 +284,9 @@ app.post('/api/missions/:id/run', async (req, res) => {
       });
       await writeJson(MISSIONS_FILE, missions);
       addLog('mission_finished', `Mission "${mission.name}" ${result.success ? 'completed' : 'failed'}: ${result.message}`);
+
+      // Trigger dependent missions
+      await triggerDependents(mission.id, missions);
     } catch (err) {
       mission.lastStatus = 'failed';
       await saveExecution({
