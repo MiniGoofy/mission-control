@@ -5,6 +5,76 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
+// ─── Cron parser (simple crontab format) ───────────────────────
+function parseCron(expr) {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [min, hour, dom, month, dow] = parts.map(p => p.split(',').map(v => {
+    if (v.includes('-')) {
+      const [start, end] = v.split('-').map(Number);
+      return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    }
+    if (v.includes('/')) {
+      const [base, step] = v.split('/');
+      const start = base === '*' ? 0 : Number(base);
+      const end = base === '*' ? 59 : 59;
+      return Array.from({ length: Math.floor((end - start) / Number(step)) + 1 }, (_, i) => start + i * Number(step));
+    }
+    return Number(v);
+  }));
+
+  const ranges = {
+    min: { min: 0, max: 59 },
+    hour: { min: 0, max: 23 },
+    dom: { min: 1, max: 31 },
+    month: { min: 1, max: 12 },
+    dow: { min: 0, max: 7 },
+  };
+
+  for (const [key, vals] of Object.entries({ min, hour, dom, month, dow })) {
+    const { min: rMin, max: rMax } = ranges[key];
+    if (!vals.every(v => v >= rMin && v <= rMax)) return null;
+  }
+
+  return { min, hour, dom, month, dow };
+}
+
+function cronMatches(expr, date = new Date()) {
+  const parsed = parseCron(expr);
+  if (!parsed) return false;
+
+  const { min, hour, dom, month, dow } = parsed;
+  const minutes = new Set(min);
+  const hours = new Set(hour);
+  const months = new Set(month);
+  const dows = new Set(dow.map(d => d === 7 ? 0 : d)); // 7 = Sunday
+
+  return (
+    minutes.has(date.getMinutes()) &&
+    hours.has(date.getHours()) &&
+    (dom.includes(date.getDate()) || dom.includes(32)) &&
+    months.has(date.getMonth() + 1) &&
+    dows.has(date.getDay())
+  );
+}
+
+function nextRun(expr) {
+  let d = new Date();
+  d.setSeconds(0, 0);
+  for (let i = 0; i < 525600; i++) { // max 1 year ahead
+    d = new Date(d.getTime() + 60000); // +1 min
+    if (cronMatches(expr, d)) return d;
+  }
+  return null;
+}
+
+function cronToHuman(expr) {
+  const parts = expr.trim().split(/\s+/);
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${parts[0]} ${parts[1]} ${parts[2]} ${months[parts[3]-1]} ${days[parts[4]]}`;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3210;
 const WORKSPACE = process.env.WORKSPACE || path.join(__dirname, '..');
@@ -364,6 +434,75 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
 
+// ─── Cron scheduler ──────────────────────────────────────────────
+const cronScheduler = { timers: new Map() };
+
+function startCronScheduler() {
+  addLog('scheduler_started', 'Cron scheduler started');
+
+  // Check every 30 seconds
+  const interval = setInterval(async () => {
+    const missions = await readJson(MISSIONS_FILE, []);
+    for (const mission of missions) {
+      if (!mission.enabled || mission.trigger !== 'cron' || !mission.cronExpr) continue;
+      if (cronMatches(mission.cronExpr)) {
+        addLog('cron_trigger', `Cron triggered "${mission.name}"`);
+        // Execute mission (similar to run endpoint)
+        const startedAt = new Date().toISOString();
+        try {
+          const result = await executeMission(mission);
+          mission.lastRun = new Date().toISOString();
+          mission.lastStatus = result.success ? 'completed' : 'failed';
+          await saveExecution({
+            id: uuidv4(),
+            missionId: mission.id,
+            missionName: mission.name,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            duration: result.duration || 0,
+            success: result.success,
+            message: result.message,
+            stepResults: result.stepResults || [],
+          });
+          await writeJson(MISSIONS_FILE, missions);
+          addLog('mission_finished', `Mission "${mission.name}" ${result.success ? 'completed' : 'failed'}: ${result.message}`);
+        } catch (err) {
+          mission.lastStatus = 'failed';
+          await saveExecution({
+            id: uuidv4(),
+            missionId: mission.id,
+            missionName: mission.name,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            duration: 0,
+            success: false,
+            message: err.message,
+            stepResults: [],
+          });
+          await writeJson(MISSIONS_FILE, missions);
+          addLog('mission_error', `Mission "${mission.name}" error: ${err.message}`);
+        }
+      }
+    }
+  }, 30000);
+
+  cronScheduler.timers.set('interval', interval);
+}
+
+app.get('/api/cron/next-runs', async (req, res) => {
+  const missions = await readJson(MISSIONS_FILE, []);
+  const cronMissions = missions
+    .filter(m => m.enabled && m.trigger === 'cron' && m.cronExpr)
+    .map(m => ({
+      id: m.id,
+      name: m.name,
+      cronExpr: m.cronExpr,
+      human: cronToHuman(m.cronExpr),
+      nextRun: nextRun(m.cronExpr),
+    }));
+  res.json(cronMissions);
+});
+
 // ─── Catch-all → frontend ────────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -373,4 +512,5 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Mission Control running at http://localhost:${PORT}`);
   console.log(`📂 Workspace: ${WORKSPACE}`);
+  startCronScheduler();
 });

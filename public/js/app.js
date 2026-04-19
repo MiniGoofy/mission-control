@@ -52,11 +52,12 @@ async function render() {
 
 // ── Dashboard ──────────────────────────────────────────────────
 async function renderDashboard(el) {
-  const [health, missionData, heartbeat, wsEntries] = await Promise.all([
+  const [health, missionData, heartbeat, wsEntries, cronRuns] = await Promise.all([
     api('/api/health'),
     api('/api/missions'),
     api('/api/state/heartbeat'),
     api('/api/state/workspace'),
+    api('/api/cron/next-runs'),
   ]);
 
   missions = missionData;
@@ -138,6 +139,28 @@ async function renderDashboard(el) {
         </div>
       `}
     </div>
+
+    ${cronRuns.length > 0 ? `
+    <div class="section">
+      <div class="section-header">
+        <h3>Active Cron Jobs</h3>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Mission</th><th>Schedule</th><th>Next Run</th></tr></thead>
+          <tbody>
+            ${cronRuns.map(c => `
+              <tr>
+                <td><strong>${esc(c.name)}</strong></td>
+                <td style="font-family:var(--mono);font-size:12px">${esc(c.cronExpr)}</td>
+                <td>${formatNextRun(c.nextRun)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
   `;
 }
 
@@ -163,6 +186,13 @@ async function renderMissions(el, actions) {
     <button class="btn btn-primary" onclick="openModal()">+ New Mission</button>
   `;
 
+  // Fetch cron next-runs
+  const cronRuns = await api('/api/cron/next-runs');
+  const cronMap = {};
+  for (const c of cronRuns) {
+    cronMap[c.id] = c;
+  }
+
   if (missions.length === 0) {
     el.innerHTML = `
       <div class="empty-state">
@@ -182,6 +212,8 @@ async function renderMissions(el, actions) {
           <tr>
             <th>Name</th>
             <th>Trigger</th>
+            <th>Cron</th>
+            <th>Next Run</th>
             <th>Steps</th>
             <th>Last Run</th>
             <th>Status</th>
@@ -194,6 +226,8 @@ async function renderMissions(el, actions) {
             <tr>
               <td><strong>${esc(m.name)}</strong><br><small style="color:var(--text-muted)">${esc(m.description || '').substring(0, 60)}</small></td>
               <td><span class="badge badge-blue">${m.trigger}</span></td>
+              <td style="font-family:var(--mono);font-size:12px">${m.cronExpr || '—'}</td>
+              <td id="next-run-${m.id}">${m.trigger === 'cron' && cronMap[m.id] ? formatNextRun(cronMap[m.id].nextRun) : '—'}</td>
               <td>${(m.steps || []).length}</td>
               <td>${m.lastRun ? timeAgo(m.lastRun) : '—'}</td>
               <td>${statusBadge(m.lastStatus)}</td>
@@ -590,6 +624,19 @@ function timeAgo(dateStr) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+function formatNextRun(date) {
+  if (!date) return '—';
+  const now = new Date();
+  const diff = date - now;
+  if (diff < 0) return 'overdue';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `in ${hrs}h ${mins % 60}m`;
+  const days = Math.floor(hrs / 24);
+  return `in ${days}d`;
 }
 
 // ── Init ───────────────────────────────────────────────────────
