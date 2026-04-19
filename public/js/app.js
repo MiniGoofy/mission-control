@@ -201,6 +201,7 @@ async function renderMissions(el, actions) {
               </td>
               <td>
                 <button class="btn-icon" onclick="runMission('${m.id}')" title="Run">▶️</button>
+                <button class="btn-icon" onclick="viewExecHistory('${m.id}', '${esc(m.name)}')" title="History">📜</button>
                 <button class="btn-icon" onclick="editMission('${m.id}')" title="Edit">✏️</button>
                 <button class="btn-icon" onclick="deleteMission('${m.id}')" title="Delete">🗑️</button>
               </td>
@@ -437,6 +438,40 @@ async function runMission(id) {
 
 async function loadMissions() {
   missions = await api('/api/missions');
+}
+
+// ── Execution History ──────────────────────────────────────────
+async function viewExecHistory(missionId, missionName) {
+  document.getElementById('exec-modal-title').textContent = `Execution History — ${missionName}`;
+  const execs = await api(`/api/missions/${missionId}/executions`);
+  const content = document.getElementById('exec-modal-content');
+
+  if (execs.length === 0) {
+    content.innerHTML = `<div class="empty-state"><div class="icon">📜</div><h3>No executions yet</h3><p>Run this mission to see history here.</p></div>`;
+  } else {
+    content.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>Duration</th><th>Status</th><th>Message</th></tr></thead>
+          <tbody>
+            ${execs.map(e => `
+              <tr>
+                <td style="white-space:nowrap">${new Date(e.startedAt).toLocaleString()}</td>
+                <td>${e.duration ? (e.duration >= 1000 ? (e.duration/1000).toFixed(1) + 's' : e.duration + 'ms') : '—'}</td>
+                <td>${statusBadge(e.success ? 'completed' : 'failed')}</td>
+                <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="${esc(e.message)}">${esc(e.message)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  document.getElementById('exec-modal').style.display = 'flex';
+}
+
+function closeExecModal() {
+  document.getElementById('exec-modal').style.display = 'none';
 }
 
 // ── Logs (SSE) ─────────────────────────────────────────────────

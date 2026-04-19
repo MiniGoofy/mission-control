@@ -29,6 +29,31 @@ async function writeJson(file, data) {
   await fs.writeFile(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
+// ─── Execution history ─────────────────────────────────────────
+const EXECUTIONS_FILE = 'executions.json';
+
+async function saveExecution(execution) {
+  const executions = await readJson(EXECUTIONS_FILE, []);
+  executions.push(execution);
+  // Keep last 500 executions
+  if (executions.length > 500) executions.splice(0, executions.length - 500);
+  await writeJson(EXECUTIONS_FILE, executions);
+}
+
+app.get('/api/missions/:id/executions', async (req, res) => {
+  const executions = await readJson(EXECUTIONS_FILE, []);
+  const missionExecs = executions
+    .filter(e => e.missionId === req.params.id)
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+    .slice(0, 50);
+  res.json(missionExecs);
+});
+
+app.get('/api/executions', async (req, res) => {
+  const executions = await readJson(EXECUTIONS_FILE, []);
+  res.json(executions.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)).slice(0, 100));
+});
+
 // ─── Missions ────────────────────────────────────────────────────
 const MISSIONS_FILE = 'missions.json';
 
@@ -87,23 +112,52 @@ app.post('/api/missions/:id/run', async (req, res) => {
   addLog('mission_started', `Mission "${mission.name}" started (manual)`);
 
   // Execute steps asynchronously
-  executeMission(mission).then((result) => {
-    mission.lastStatus = result.success ? 'completed' : 'failed';
-    writeJson(MISSIONS_FILE, missions);
-    addLog('mission_finished', `Mission "${mission.name}" ${result.success ? 'completed' : 'failed'}: ${result.message}`);
-  }).catch((err) => {
-    mission.lastStatus = 'failed';
-    writeJson(MISSIONS_FILE, missions);
-    addLog('mission_error', `Mission "${mission.name}" error: ${err.message}`);
-  });
+  (async () => {
+    const startedAt = new Date().toISOString();
+    try {
+      const result = await executeMission(mission);
+      const duration = Date.now() - Date.now() + 1; // will be set properly below
+      mission.lastStatus = result.success ? 'completed' : 'failed';
+      await saveExecution({
+        id: uuidv4(),
+        missionId: mission.id,
+        missionName: mission.name,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        duration: result.duration || 0,
+        success: result.success,
+        message: result.message,
+        stepResults: result.stepResults || [],
+      });
+      await writeJson(MISSIONS_FILE, missions);
+      addLog('mission_finished', `Mission "${mission.name}" ${result.success ? 'completed' : 'failed'}: ${result.message}`);
+    } catch (err) {
+      mission.lastStatus = 'failed';
+      await saveExecution({
+        id: uuidv4(),
+        missionId: mission.id,
+        missionName: mission.name,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        duration: 0,
+        success: false,
+        message: err.message,
+        stepResults: [],
+      });
+      await writeJson(MISSIONS_FILE, missions);
+      addLog('mission_error', `Mission "${mission.name}" error: ${err.message}`);
+    }
+  })();
 
   res.json({ ok: true, mission });
 });
 
 // ─── Step execution ──────────────────────────────────────────────
 async function executeMission(mission) {
-  const results = [];
+  const startTime = Date.now();
+  const stepResults = [];
   for (const step of mission.steps) {
+    const stepStart = Date.now();
     let result;
     switch (step.type) {
       case 'command':
@@ -123,12 +177,15 @@ async function executeMission(mission) {
       default:
         result = { success: false, message: `Unknown step type: ${step.type}` };
     }
-    results.push({ step, result });
+    stepResults.push({
+      step, result,
+      duration: Date.now() - stepStart,
+    });
     if (!result.success && step.onFailure === 'abort') {
-      return { success: false, message: `Step "${step.label || step.type}" failed: ${result.message}` };
+      return { success: false, message: `Step "${step.label || step.type}" failed: ${result.message}`, duration: Date.now() - startTime, stepResults };
     }
   }
-  return { success: true, message: `All ${results.length} steps completed`, results };
+  return { success: true, message: `All ${stepResults.length} steps completed`, duration: Date.now() - startTime, stepResults };
 }
 
 function runCommand(cmd) {
