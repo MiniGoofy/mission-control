@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1><span class="icon">🎯</span> <span>Mission Control</span></h1>
+      <p>OpenClaw Dashboard</p>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-page="dashboard">
+        <span class="nav-icon">📊</span> <span>Dashboard</span>
+      </button>
+      <button class="nav-item" data-page="missions">
+        <span class="nav-icon">🚀</span> <span>Missions</span>
+      </button>
+      <button class="nav-item" data-page="logs">
+        <span class="nav-icon">📋</span> <span>Logs</span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <span class="nav-icon">⚙️</span> <span>Settings</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <span class="status-dot"></span> <span>Connected</span>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <h2 id="page-title">Dashboard</h2>
+      <div id="topbar-actions"></div>
+    </div>
+    <div class="content" id="content"></div>
+
+    <!-- Logs panel -->
+    <div class="logs-panel" id="logs-panel">
+      <div class="logs-header">
+        <span>📋 Activity Log</span>
+        <button class="btn btn-sm" onclick="clearLogs()">Clear</button>
+      </div>
+      <div id="logs-container"></div>
+    </div>
+  </div>
+
+  <!-- Mission Modal -->
+  <div class="modal-overlay" id="mission-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">New Mission</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <form id="mission-form" onsubmit="saveMission(event)">
+        <input type="hidden" id="mission-id">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="mission-name" required placeholder="e.g. Morning Briefing">
+        </div>
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="mission-desc" placeholder="What does this mission do?"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Trigger</label>
+            <select id="mission-trigger" onchange="toggleCron()">
+              <option value="manual">Manual</option>
+              <option value="cron">Cron Schedule</option>
+              <option value="webhook">Webhook</option>
+            </select>
+          </div>
+          <div class="form-group" id="cron-group" style="display:none">
+            <label>Cron Expression</label>
+            <input type="text" id="mission-cron" placeholder="e.g. 0 9 * * 1-5">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Steps</label>
+          <div class="steps-editor" id="steps-editor"></div>
+          <button type="button" class="btn btn-sm" onclick="addStep()" style="margin-top:8px">+ Add Step</button>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Mission</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>
